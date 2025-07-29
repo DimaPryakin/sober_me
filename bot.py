@@ -1,11 +1,15 @@
-import sqlite3
-from datetime import date, time
-import re
 import asyncio
+import sqlite3
+import re
+from datetime import date, time
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, CallbackContext, filters
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    CallbackContext,
+    filters
 )
 
 # 📁 База данных
@@ -32,7 +36,7 @@ CREATE TABLE IF NOT EXISTS settings (
 ''')
 conn.commit()
 
-# 🔧 Утилиты
+# 🛠 Утилиты БД
 def init_user(user_id):
     c.execute("INSERT OR IGNORE INTO progress (user_id, start_date) VALUES (?, ?)", (user_id, date.today().isoformat()))
     conn.commit()
@@ -60,28 +64,22 @@ def get_stats(user_id):
     return c.fetchone()
 
 def save_notify_time(chat_id, hour, minute):
-    c.execute("REPLACE INTO settings (chat_id, notify_hour, notify_minute) VALUES (?, ?, ?)",
-              (chat_id, hour, minute))
+    c.execute("REPLACE INTO settings (chat_id, notify_hour, notify_minute) VALUES (?, ?, ?)", (chat_id, hour, minute))
     conn.commit()
-
-def load_notify_time(chat_id):
-    c.execute("SELECT notify_hour, notify_minute FROM settings WHERE chat_id=?", (chat_id,))
-    return c.fetchone()
 
 def get_all_notify_times():
     c.execute("SELECT chat_id, notify_hour, notify_minute FROM settings")
     return c.fetchall()
 
-# 🧠 Состояние и клавиатура
-TOKEN = "7567781159:AAHzuKX2mRfkqTX_1kt8XTD2BGqiQjy57W4"
-user_jobs = {}
+# 🎛 Состояния
 user_states = {}
+user_jobs = {}
 keyboard = ReplyKeyboardMarkup([["✅ Нет", "❌ Да"]], one_time_keyboard=True)
 
 def is_valid_time_format(text):
     return re.match(r'^\d{1,2}:\d{2}$', text)
 
-# 🔔 Напоминание
+# 🔔 Ежедневное напоминание
 async def daily_prompt(context: CallbackContext):
     chat_id = context.job.chat_id
     await context.bot.send_message(chat_id=chat_id, text="Ты сегодня употреблял алкоголь?", reply_markup=keyboard)
@@ -92,8 +90,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     init_user(user_id)
     user_states[user_id] = "waiting_time"
-    await update.message.reply_text("👋 Введи время напоминаний в формате HH:MM (например 19:30)")
+    await update.message.reply_text("👋 Введи время напоминания в формате HH:MM (например 19:30)")
 
+# 🕒 Обработка времени
 async def handle_time_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -103,17 +102,15 @@ async def handle_time_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏰ Формат должен быть HH:MM, например 20:00")
         return
 
-    try:
-        hour, minute = map(int, text.split(":"))
-        save_notify_time(chat_id, hour, minute)
-        time_obj = time(hour=hour, minute=minute)
-        job = context.application.job_queue.run_daily(daily_prompt, time_obj, chat_id=chat_id)
-        user_jobs[chat_id] = job
-        user_states[user_id] = "waiting_spend"
-        await update.message.reply_text("✅ Время установлено!\nТеперь укажи, сколько ты обычно тратишь на алкоголь в день (например 10)")
-    except:
-        await update.message.reply_text("🚫 Не удалось обработать время. Попробуй ещё раз.")
+    hour, minute = map(int, text.split(":"))
+    save_notify_time(chat_id, hour, minute)
+    time_obj = time(hour=hour, minute=minute)
+    job = context.application.job_queue.run_daily(daily_prompt, time_obj, chat_id=chat_id)
+    user_jobs[chat_id] = job
+    user_states[user_id] = "waiting_spend"
+    await update.message.reply_text("✅ Время установлено!\nТеперь введи сумму, которую ты обычно тратишь на алкоголь в день (например 10)")
 
+# 💸 Обработка суммы
 async def handle_spend_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
@@ -121,11 +118,11 @@ async def handle_spend_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         amount = float(text.replace(",", "."))
         set_daily_spend(user_id, amount)
         user_states[user_id] = None
-        await update.message.reply_text("👍 Спасибо! Теперь я буду присылать напоминания каждый день.")
+        await update.message.reply_text("👍 Спасибо! Я буду присылать напоминания каждый день.")
     except:
-        await update.message.reply_text("🚫 Пожалуйста, введи число, например: 12.5")
+        await update.message.reply_text("🚫 Пожалуйста, введи число (например: 12.5)")
 
-# ✅ Обработка ответов
+# 📥 Ответ пользователя
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
@@ -151,28 +148,18 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("🤔 Не понял сообщение. Используй кнопки или следуй инструкции.")
 
-# 🚀 Запуск приложения
+# 🚀 Запуск
 async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = Application.builder().token("7567781159:AAHzuKX2mRfkqTX_1kt8XTD2BGqiQjy57W4").build()
 
-    # 🔌 Обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_response))
 
-    await app.initialize()
-    await app.start()
-
-    # 🔔 Восстановление напоминаний
     for chat_id, hour, minute in get_all_notify_times():
         time_obj = time(hour=hour, minute=minute)
-        job = app.job_queue.run_daily(daily_prompt, time_obj, chat_id=chat_id)
-        user_jobs[chat_id] = job
+        app.job_queue.run_daily(daily_prompt, time_obj, chat_id=chat_id)
 
-    # ✅ Правильный запуск Polling
     await app.run_polling()
-    await app.stop()
-    await app.shutdown()
 
-# ▶ Запуск
 if __name__ == "__main__":
     asyncio.run(main())
