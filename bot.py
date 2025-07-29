@@ -168,8 +168,9 @@ async def main():
         job = app.job_queue.run_daily(daily_prompt, time_obj, chat_id=chat_id)
         user_jobs[chat_id] = job
 
-    await app.updater.start_polling()
-    await app.updater.wait_until_closed()
+    # ✅ Правильный запуск Polling
+    await app.run_polling()
+    await app.stop()
     await app.shutdown()
 
 # ▶ Запуск
